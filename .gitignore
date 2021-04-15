@@ -3,6 +3,7 @@
 **/rsconnect
 **/__pycache__
 **/venv
+**/scratch
+**/sims
 *.ipynb
 .DS_Store
-scratch.py
