@@ -13,5 +13,5 @@ def next_expiry(dt):
         return this_expiry - nyse_bday
     else:
         first_day = dt + pd.offsets.MonthBegin(1)
-        exp_day = 15 + (4 - first_day.dayofweek) % 7
+        exp_day = 16 + (4 - first_day.dayofweek) % 7
         return pd.Timestamp(first_day.year, first_day.month, exp_day) - nyse_bday
