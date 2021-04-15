@@ -1,0 +1,8 @@
+**/.idea
+**/.ipynb_checkpoints
+**/rsconnect
+**/__pycache__
+**/venv
+*.ipynb
+.DS_Store
+scratch.py
