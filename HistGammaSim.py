@@ -94,8 +94,8 @@ for count, dt in enumerate(days):
         if abs(pf.loc[t, 'TotPnL']) > outlier:
             outliers.loc[dt, ['Ticker', 'PnL']] = t, pf.loc[t, 'TotPnL']
     pnls.loc[dt, 'PnL'] = pf['TotPnL'].sum()
-    pnls.loc[dt, 'LongsV'] = (pf['Qty'] * pf['CurrP']).loc[pf['Qty'] > 0].sum()
-    pnls.loc[dt, 'ShortsV'] = (pf['Qty'] * pf['CurrP']).loc[pf['Qty'] < 0].sum()
+    pnls.loc[dt, 'LongsP'] = (pf['Qty'] * pf['CurrP']).loc[pf['Qty'] > 0].sum()
+    pnls.loc[dt, 'ShortsP'] = (pf['Qty'] * pf['CurrP']).loc[pf['Qty'] < 0].sum()
     pnls.loc[dt, 'LongsD'] = (pf['Qty'] * pf['CurrS'] * pf['CurrD']).loc[pf['Qty'] > 0].sum()
     pnls.loc[dt, 'ShortsD'] = (pf['Qty'] * pf['CurrS'] * pf['CurrD']).loc[pf['Qty'] < 0].sum()
     pnls.loc[dt, 'LongsG'] = (pf['Qty'] * pf['CurrS'] * pf['CurrG']).loc[pf['Qty'] > 0].sum()
