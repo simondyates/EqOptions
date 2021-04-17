@@ -1,4 +1,4 @@
-# TO DO: Move greeks to post expiry; Implement SPY Hedge; Multi-thread
+# TO DO: Implement SPY Hedge, maybe add some graphs
 
 # Runs a simplified trading simulation
 #
@@ -13,6 +13,7 @@ import numpy as np
 from utils import next_expiry, expiry_list
 import random
 from OptionPricer import EuroOption
+import concurrent.futures
 
 # Key simulation behaviour variables
 pf_size = 500
@@ -37,13 +38,15 @@ prices = prices[universe.append(pd.Index(['SPY']))]
 returns = np.log(prices) - np.log(prices.shift())
 stds = returns.rolling(std_window).std() * 252**0.5
 stds = stds[stds.notna().all(axis=1)]
-stds = stds.iloc[:100]
 
 # Specify final output columns
 out_cols = ['PnL', 'LongsP', 'ShortsP', 'LongsD', 'ShortsD', 'LongsG', 'ShortsG',
             'LongsT', 'ShortsT', 'LongsV', 'ShortsV']
 
-def run_sim(start_dt, end_dt):
+def run_sim(dts):
+    start_dt = dts[0]
+    end_dt = dts[1]
+
     # Introduce yourself
     print(f'Processing month {start_dt:%b-%Y}')
 
@@ -98,6 +101,7 @@ def run_sim(start_dt, end_dt):
             pf.loc[t, 'HedgePnL'] = -pf.loc[t, 'Qty'] * pf.loc[t, 'PrevD'] * (pf.loc[t, 'CurrS'] - pf.loc[t, 'PrevS'])
             pf.loc[t, 'TotPnL'] = pf.loc[t, 'OptPnL'] + pf.loc[t, 'HedgePnL']
             if abs(pf.loc[t, 'TotPnL']) > outlier:
+                print(f'Outlier: {t} just did {pf.loc[t, "TotPnL"]:,.0f}')
                 outliers.loc[dt, ['Ticker', 'PnL']] = t, pf.loc[t, 'TotPnL']
         write_date(dt)
     return pnls, outliers
@@ -108,18 +112,19 @@ def main():
     dt_ranges = [(expiries[i], expiries[i + 1]) for i in range(len(expiries) - 1)]
 
     # Initialise result variables
-    global pnls, outliers, result_pairs
     idx = stds[expiries[0]:expiries[-1]].index
     pnls = pd.DataFrame(0, index=idx, columns=out_cols)
     outliers = pd.DataFrame()
-    result_pairs = [run_sim(*t) for t in dt_ranges]
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        result_pairs = executor.map(run_sim, dt_ranges)
 
+    # Reassemble the chunks
     for pair in result_pairs:
         pnl, outs = pair
         pnls.loc[pnl.index] += pnl
-        outliers.append(outs)
+        outliers = outliers.append(outs)
 
-    # Summarise and display results
+    # Save and display results
     name = f'Sz={pf_size}_Pct={pct_shorts}_SPY={spy_hedge}_Theta={init_theta}_{pd.Timestamp.now():%Y%m%d_%H%M}'
     pnls.to_csv(f'./sims/{name}.csv')
     outliers.to_csv(f'./sims/{name}_outs.csv')
