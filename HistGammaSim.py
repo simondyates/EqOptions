@@ -55,7 +55,7 @@ def pick_tickers(dt):
     low_vols = stds.columns[stds.loc[dt] < max_vol].intersection(universe).to_list()
     pf = random.sample(low_vols, min(pf_size, len(low_vols)))
     shorts = random.sample(pf, int(len(pf) * pct_shorts))
-    longs = [t for t in pf if t not in shorts]
+    # longs = [t for t in pf if t not in shorts]
     cols = ['CurrS', 'PrevS', 'Qty', 'K', 'Exp', 'CurrP', 'PrevP', 'CurrD', 'PrevD', 'CurrT', 'CurrG', 'CurrV']
     pf = pd.DataFrame(index=pf, columns=cols)
     expiry = next_expiry(dt + nyse_bday)
