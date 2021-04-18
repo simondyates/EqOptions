@@ -1,6 +1,6 @@
 # TO DO: Try to speed up function call; Implement SPY Hedge
 
-# Runs a simplified trading simulation
+# Runs a simplified trading simulation: Multi-Threaded Implementation
 #
 # A trading portfolio consisting of a specified number of short and long names is created
 # at the close on the 3rd Friday of each month.  The portfolio is chosen from a universe with
