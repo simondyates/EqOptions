@@ -1,4 +1,4 @@
-# TO DO: Implement SPY Hedge, maybe add some graphs
+# TO DO: Try to speed up function call; Implement SPY Hedge; Maybe add some graphs
 
 # Runs a simplified trading simulation
 #
@@ -20,6 +20,7 @@ pf_size = 500
 pct_shorts = .5
 spy_hedge = False
 init_theta = 25000
+max_pf_gamma = 100000000 # max portfolio gamma at inception
 std_window = 63
 max_vol = .7
 r = 0.0011
@@ -54,13 +55,29 @@ def run_sim(dts):
     pnls = pd.DataFrame(columns=out_cols)
     outliers = pd.DataFrame(columns=['Ticker', 'PnL'])
 
-    # Pick tickers
+    # Initialise first day positions and greeks
     low_vols = stds.columns[stds.loc[start_dt] < max_vol].to_list()
-    pf = random.sample(low_vols, min(pf_size, len(low_vols)))
-    shorts = random.sample(pf, int(len(pf) * pct_shorts))
 
-    # Init table for storing daily values per ticker, and pnl storage function
-    pf = pd.DataFrame(index=pf)
+    # Try multiple portfolios until one meets max portfolio gamma constraint
+    pf_gamma = max_pf_gamma + 1
+    while pf_gamma > max_pf_gamma:
+        # Pick tickers
+        pf = random.sample(low_vols, min(pf_size, len(low_vols)))
+        shorts = random.sample(pf, int(len(pf) * pct_shorts))
+        pf = pd.DataFrame(index=pf)
+        # Set quantities
+        for t in pf.index:
+            S = K = prices.loc[start_dt, t]
+            sig = stds.loc[start_dt, t]
+            p, d, g, v = EuroOption(S, K, 'C', sig, start_dt, end_dt, 0, 0, r)
+            q = (init_theta * 252) / (50 * sig**2 * S * g) * (-1 if t in shorts else 1)
+            pf.loc[t, 'TotPnL'] = 0
+            pf.loc[t, ['CurrS', 'K', 'Exp', 'Qty', 'CurrP', 'CurrD', 'CurrG', 'CurrV']] = [S, K, end_dt, q, p, d, g, v]
+            pf.loc[t, 'CurrT'] = 50 * S * g * sig ** 2 / 252
+        # Check compliance
+            pf_gamma = abs((pf['Qty'] * pf['CurrS'] * pf['CurrG']).sum())
+
+    # Write initial values to pnls
     def write_date(dt):
         pnls.loc[dt, 'PnL'] = pf['TotPnL'].sum()
         pnls.loc[dt, 'LongsP'] = (pf['Qty'] * pf['CurrP']).loc[pf['Qty'] > 0].sum()
@@ -74,15 +91,6 @@ def run_sim(dts):
         pnls.loc[dt, 'LongsV'] = (pf['Qty'] * pf['CurrV']).loc[pf['Qty'] > 0].sum()
         pnls.loc[dt, 'ShortsV'] = (pf['Qty'] * pf['CurrV']).loc[pf['Qty'] < 0].sum()
 
-    # Initialise first day positions and greeks
-    for t in pf.index:
-        S = K = prices.loc[start_dt, t]
-        sig = stds.loc[start_dt, t]
-        p, d, g, v = EuroOption(S, K, 'C', sig, start_dt, end_dt, 0, 0, r)
-        q = (init_theta * 252) / (50 * sig**2 * S * g) * (-1 if t in shorts else 1)
-        pf.loc[t, 'TotPnL'] = 0
-        pf.loc[t, ['CurrS', 'K', 'Exp', 'Qty', 'CurrP', 'CurrD', 'CurrG', 'CurrV']] = [S, K, end_dt, q, p, d, g, v]
-        pf.loc[t, 'CurrT'] = 50 * S * g * sig ** 2 / 252
     write_date(start_dt)
 
     # Calculate daily P&L through expiration
@@ -141,4 +149,5 @@ def main():
         print(f'{pnls.index[-i-1]:%Y-%m-%d}: {pnls.iloc[-i-1, 0]:,.0f}')
 
 if __name__ == '__main__':
-    main()
+    for i in range(10):
+        main()
