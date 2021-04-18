@@ -1,4 +1,4 @@
-# TO DO: Try to speed up function call; Implement SPY Hedge; Maybe add some graphs
+# TO DO: Try to speed up function call; Implement SPY Hedge
 
 # Runs a simplified trading simulation
 #
@@ -16,24 +16,25 @@ from OptionPricer import EuroOption
 import concurrent.futures
 
 # Key simulation behaviour variables
-pf_size = 500
+pf_size = 500 # underlyings
 pct_shorts = .5
-spy_hedge = False
-init_theta = 25000
+spy_hedge = False # not implemented yet anyway
+init_theta = 25000 # per name |theta| at position inception
 max_pf_gamma = 100000000 # max portfolio gamma at inception
-std_window = 63
-max_vol = .7
-r = 0.0011
-outlier = 5000000
+std_window = 63 # use 3 month hist vols
+max_vol = .7 # don't trade anything more volatile than this
+r = 0.0011 # risk free rate
+outlier = 5000000 # record individual name-day P&L with abs mag bigger than this
 
 # Load price and ADV data, set universe
 prices = pd.read_pickle('5yrHistData.pkl')
 prices = prices.loc[:, prices.notna().all()]
 avg_data = pd.read_pickle('SPX+MID+R2K_USD5mADV_40bp_spd.pkl').sort_values('ADV_USD', ascending=False)
-universe = avg_data.index.intersection(prices.columns)[:1000]
+# avg_data contains info like ADV, spread width etc.  We're interested in ADV so we can filter the universe
+universe = avg_data.index.intersection(prices.columns)[:1000] # 1,000 most traded stocks we have data for
 biotechs = pd.read_csv('Biotechs.csv', index_col='Symbol')
-universe = universe.difference(biotechs.index)
-prices = prices[universe.append(pd.Index(['SPY']))]
+universe = universe.difference(biotechs.index) # exclude biotechs
+prices = prices[universe.append(pd.Index(['SPY']))] # for when SPY hedge implemented
 
 # Calculate returns and rolling standard deviations of returns
 returns = np.log(prices) - np.log(prices.shift())
@@ -44,6 +45,7 @@ stds = stds[stds.notna().all(axis=1)]
 out_cols = ['PnL', 'LongsP', 'ShortsP', 'LongsD', 'ShortsD', 'LongsG', 'ShortsG',
             'LongsT', 'ShortsT', 'LongsV', 'ShortsV']
 
+# Function to run the sim between two dates
 def run_sim(dts):
     start_dt = dts[0]
     end_dt = dts[1]
@@ -75,7 +77,7 @@ def run_sim(dts):
             pf.loc[t, ['CurrS', 'K', 'Exp', 'Qty', 'CurrP', 'CurrD', 'CurrG', 'CurrV']] = [S, K, end_dt, q, p, d, g, v]
             pf.loc[t, 'CurrT'] = 50 * S * g * sig ** 2 / 252
         # Check compliance
-            pf_gamma = abs((pf['Qty'] * pf['CurrS'] * pf['CurrG']).sum())
+        pf_gamma = abs((pf['Qty'] * pf['CurrS'] * pf['CurrG']).sum())
 
     # Write initial values to pnls
     def write_date(dt):
@@ -123,6 +125,8 @@ def main():
     idx = stds[expiries[0]:expiries[-1]].index
     pnls = pd.DataFrame(0, index=idx, columns=out_cols)
     outliers = pd.DataFrame()
+
+    # Run sim using multi-threading across available CPU cores
     with concurrent.futures.ProcessPoolExecutor() as executor:
         result_pairs = executor.map(run_sim, dt_ranges)
 
