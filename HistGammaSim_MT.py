@@ -44,6 +44,7 @@ stds = stds[stds.notna().all(axis=1)]
 # Specify final output columns
 out_cols = ['PnL', 'LongsP', 'ShortsP', 'LongsD', 'ShortsD', 'LongsG', 'ShortsG',
             'LongsT', 'ShortsT', 'LongsV', 'ShortsV']
+# PnL, option premium value, delta, gamma, theta, vega
 
 # Function to run the sim between two dates
 def run_sim(dts):
@@ -53,11 +54,9 @@ def run_sim(dts):
     # Introduce yourself
     print(f'Processing month {start_dt:%b-%Y}')
 
-    # Initialise result variables
+    # Initialise result variables and filters
     pnls = pd.DataFrame(columns=out_cols)
     outliers = pd.DataFrame(columns=['Ticker', 'PnL'])
-
-    # Initialise first day positions and greeks
     low_vols = stds.columns[stds.loc[start_dt] < max_vol].to_list()
 
     # Try multiple portfolios until one meets max portfolio gamma constraint
