@@ -1,5 +1,5 @@
-from math import exp, log, pi
 from scipy.stats import norm
+from math import exp, log, pi
 from datetime import timedelta
 
 def EuroOption(S, K, putcall, sig, today, expiry, divyld_cc, bc_cc, r):
@@ -15,8 +15,6 @@ def EuroOption(S, K, putcall, sig, today, expiry, divyld_cc, bc_cc, r):
         return price, delta, gamma, vega
 
     q = divyld_cc + bc_cc  # i.e. use a +ve bc if short and -ve if long
-
-    fwd = S * exp((r - q) * t)
 
     srt = sig * t ** 0.5
     d1 = (log(S / K) + t * (r - q + sig ** 2 / 2)) / srt

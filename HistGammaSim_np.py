@@ -1,6 +1,6 @@
-# TO DO: Try to speed up function call; Implement SPY Hedge
+# TO DO: Implement SPY Hedge
 
-# Runs a simplified trading simulation: Multi-Threaded Implementation
+# Runs a simplified trading simulation: Multi-Threaded Implementation with vectorized portfolio pricing
 #
 # A trading portfolio consisting of a specified number of short and long names is created
 # at the close on the 3rd Friday of each month.  The portfolio is chosen from a universe with
@@ -12,7 +12,7 @@ import pandas as pd
 import numpy as np
 from utils import next_expiry, expiry_list
 import random
-from OptionPricer import EuroOption
+from OptionPricer_np import EuroOption
 import concurrent.futures
 
 # Key simulation behaviour variables
@@ -56,7 +56,7 @@ def run_sim(dts):
 
     # Initialise result variables and filters
     pnls = pd.DataFrame(columns=out_cols)
-    outliers = pd.DataFrame(columns=['Ticker', 'PnL'])
+    outliers = pd.DataFrame()
     low_vols = stds.columns[stds.loc[start_dt] < max_vol].to_list()
 
     # Try multiple portfolios until one meets max portfolio gamma constraint
@@ -67,14 +67,19 @@ def run_sim(dts):
         shorts = random.sample(pf, int(len(pf) * pct_shorts))
         pf = pd.DataFrame(index=pf)
         # Set quantities
-        for t in pf.index:
-            S = K = prices.loc[start_dt, t]
-            sig = stds.loc[start_dt, t]
-            p, d, g, v = EuroOption(S, K, 'C', sig, start_dt, end_dt, 0, 0, r)
-            q = (init_theta * 252) / (50 * sig**2 * S * g) * (-1 if t in shorts else 1)
-            pf.loc[t, 'TotPnL'] = 0
-            pf.loc[t, ['CurrS', 'K', 'Exp', 'Qty', 'CurrP', 'CurrD', 'CurrG', 'CurrV']] = [S, K, end_dt, q, p, d, g, v]
-            pf.loc[t, 'CurrT'] = 50 * S * g * sig ** 2 / 252
+        S = K = prices.loc[start_dt, pf.index]
+        sig = stds.loc[start_dt, pf.index]
+        p, d, g, v = EuroOption(S, K, False, sig, start_dt, end_dt, 0, 0, r)
+        q = (init_theta * 252) / (50 * sig**2 * S * g) * (1 - 2 * pf.index.isin(shorts))
+        pf['TotPnL'] = 0
+        pf['CurrS'] = S
+        pf['K'] = K
+        pf['Qty'] = q
+        pf['CurrP'] = p
+        pf['CurrD'] = d
+        pf['CurrG'] = g
+        pf['CurrV'] = v
+        pf['CurrT'] = 50 * S * g * sig ** 2 / 252
         # Check compliance
         pf_gamma = abs((pf['Qty'] * pf['CurrS'] * pf['CurrG']).sum())
 
@@ -101,17 +106,20 @@ def run_sim(dts):
         pf['PrevP'] = pf['CurrP']
         pf['PrevD'] = pf['CurrD']
         pf['CurrS'] = prices.loc[dt, pf.index]
-        for t in pf.index:
-            S, K, expiry = pf.loc[t, ['CurrS', 'K', 'Exp']]
-            sig = stds.loc[dt, t]
-            pf.loc[t, ['CurrP', 'CurrD', 'CurrG', 'CurrV']] = EuroOption(S, K, 'C', sig, dt, expiry, 0, 0, r)
-            pf.loc[t, 'CurrT'] = 50 * S * pf.loc[t, 'CurrG'] * sig**2 / 252
-            pf.loc[t, 'OptPnL'] = pf.loc[t, 'Qty'] * (pf.loc[t, 'CurrP'] - pf.loc[t, 'PrevP'])
-            pf.loc[t, 'HedgePnL'] = -pf.loc[t, 'Qty'] * pf.loc[t, 'PrevD'] * (pf.loc[t, 'CurrS'] - pf.loc[t, 'PrevS'])
-            pf.loc[t, 'TotPnL'] = pf.loc[t, 'OptPnL'] + pf.loc[t, 'HedgePnL']
-            if abs(pf.loc[t, 'TotPnL']) > outlier:
-                print(f'Outlier: {t} just did {pf.loc[t, "TotPnL"]:,.0f}')
-                outliers.loc[dt, ['Ticker', 'PnL']] = t, pf.loc[t, 'TotPnL']
+        S, K = pf['CurrS'], pf['K']
+        sig = stds.loc[dt, pf.index]
+        p, d, g, v = EuroOption(S, K, False, sig, dt, end_dt, 0, 0, r)
+        pf['CurrP'] = p
+        pf['CurrD'] = d
+        pf['CurrG'] = g
+        pf['CurrV'] = v
+        pf['CurrT'] = 50 * S * pf['CurrG'] * sig**2 / 252
+        pf['OptPnL'] = pf['Qty'] * (pf['CurrP'] - pf['PrevP'])
+        pf['HedgePnL'] = -pf['Qty'] * pf['PrevD'] * (pf['CurrS'] - pf['PrevS'])
+        pf['TotPnL'] = pf['OptPnL'] + pf['HedgePnL']
+        outs = [[dt, tk, pf.loc[tk, 'TotPnL']] for tk in pf[abs(pf['TotPnL']) > outlier].index]
+        if len(outs) > 0:
+            outliers = outliers.append(outs)
         write_date(dt)
     return pnls, outliers
 
