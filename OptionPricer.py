@@ -1,47 +1,44 @@
+import numpy as np
 from scipy.stats import norm
-from math import exp, log, pi
-from datetime import timedelta
+from datetime import datetime, timedelta
 
-def EuroOption(S, K, putcall, sig, today, expiry, divyld_cc, bc_cc, r):
-    putcall = putcall.lower()
+def EuroOption(S, K, is_put, sig, today, expiry, divyld_cc, bc_cc, r):
+    # Inputs can be scalars or arrays
+    # Returns scalars if all inputs are scalar, otherwise numpy.ndarray
 
-    t = (expiry - today) / timedelta(days=365)
-    if t <= 0:
-        if putcall == 'c':
-            price = max(0, S - K)
-        else:
-            price = max(0, K - S)
-        delta = gamma = vega = 0
-        return price, delta, gamma, vega
-
-    q = divyld_cc + bc_cc  # i.e. use a +ve bc if short and -ve if long
+    t = np.clip((expiry - today) / timedelta(days=365), 0, None)
+    q = divyld_cc + bc_cc  # i.e. use a +ve bc if stock hedge is short and -ve if long
 
     srt = sig * t ** 0.5
-    d1 = (log(S / K) + t * (r - q + sig ** 2 / 2)) / srt
+    np.seterr(divide='ignore', invalid='ignore') # t might contain zeros, which we handle
+    d1 = (np.log(S / K) + t * (r - q + sig ** 2 / 2)) / srt
     d2 = d1 - srt
 
-    if putcall == 'c':
-        nd1 = norm.cdf(d1)
-        nd2 = norm.cdf(d2)
-        price = S * exp(-q * t) * nd1 - K * exp(-r * t) * nd2
-    else:
-        nd1 = norm.cdf(-d1)
-        nd2 = norm.cdf(-d2)
-        price = -S * exp(-q * t) * nd1 + K * exp(-r * t) * nd2
+    nd1 = norm.cdf(d1) * (1 - is_put) + norm.cdf(-d1) * is_put
+    nd2 = norm.cdf(d2) * (1 - is_put) + norm.cdf(-d2) * is_put
+    price = np.array((S * np.exp(-q * t) * nd1 - K * np.exp(-r * t) * nd2) * (1 - 2 * is_put))
+    price[t == 0] = np.clip((S-K) * (1 - 2 * is_put), 0, None)
 
     nd1 = norm.cdf(d1)
-    if putcall == 'c':
-        delta = exp(-q * t) * nd1
-    else:
-        delta = exp(-q * t) * (nd1 - 1)
+    delta = np.array(np.exp(-q * t) * (nd1 - is_put))
+    delta[t == 0] = 0
 
-    t1 = exp(-q * t) / (S * sig * t ** 0.5)
-    t2 = (2 * pi) ** (-0.5) * exp(-d1 ** 2 / 2)
+    t1 = np.exp(-q * t) / (S * sig * t ** 0.5)
+    t2 = (2 * np.pi) ** (-0.5) * np.exp(-d1 ** 2 / 2)
     t3 = S / 100  # Comment this out if you don't want d(delta)for 1% stock move
-    gamma = t1 * t2 * t3
+    gamma = np.array(t1 * t2 * t3)
+    gamma[t == 0] = 0
 
-    t1 = S * exp(-q * t) * t ** 0.5 / 100
-    t2 = exp(-d1 ** 2 / 2) / (2 * pi) ** (0.5)
-    vega = t1 * t2
+    t1 = S * np.exp(-q * t) * t ** 0.5 / 100
+    t2 = np.exp(-d1 ** 2 / 2) / (2 * np.pi) ** 0.5
+    vega = np.array(t1 * t2)
+    vega[t == 0] = 0
+
+    # Return scalars if we can
+    if not(price.shape):
+        price = price.item()
+        delta = delta.item()
+        gamma = gamma.item()
+        vega = vega.item()
 
     return price, delta, gamma, vega
