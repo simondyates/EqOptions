@@ -31,7 +31,7 @@ prices = pd.read_pickle('5yrHistData.pkl')
 prices = prices.loc[:, prices.notna().all()]
 avg_data = pd.read_pickle('SPX+MID+R2K_USD5mADV_40bp_spd.pkl').sort_values('ADV_USD', ascending=False)
 # avg_data contains info like ADV, spread width etc.  We're interested in ADV so we can filter the universe
-universe = avg_data.index.intersection(prices.columns)[:1000] # 1,000 most traded stocks we have data for
+universe = avg_data.index.intersection(prices.columns)#[:1000] # 1,000 most traded stocks we have data for
 biotechs = pd.read_csv('Biotechs.csv', index_col='Symbol')
 universe = universe.difference(biotechs.index) # exclude biotechs
 prices = prices[universe.append(pd.Index(['SPY']))] # for when SPY hedge implemented
@@ -44,7 +44,6 @@ stds = stds[stds.notna().all(axis=1)]
 # Specify final output columns
 out_cols = ['PnL', 'LongsP', 'ShortsP', 'LongsD', 'ShortsD', 'LongsG', 'ShortsG',
             'LongsT', 'ShortsT', 'LongsV', 'ShortsV']
-# PnL, option premium value, delta, gamma, theta, vega
 
 # Function to run the sim between two dates
 def run_sim(dts):
@@ -79,7 +78,7 @@ def run_sim(dts):
         pf['CurrD'] = d
         pf['CurrG'] = g
         pf['CurrV'] = v
-        pf['CurrT'] = 50 * S * g * sig ** 2 / 252
+        pf['CurrT'] = -50 * S * g * sig ** 2 / 252
         # Check compliance
         pf_gamma = abs((pf['Qty'] * pf['CurrS'] * pf['CurrG']).sum())
 
@@ -113,7 +112,7 @@ def run_sim(dts):
         pf['CurrD'] = d
         pf['CurrG'] = g
         pf['CurrV'] = v
-        pf['CurrT'] = 50 * S * pf['CurrG'] * sig**2 / 252
+        pf['CurrT'] = -50 * S * pf['CurrG'] * sig**2 / 252
         pf['OptPnL'] = pf['Qty'] * (pf['CurrP'] - pf['PrevP'])
         pf['HedgePnL'] = -pf['Qty'] * pf['PrevD'] * (pf['CurrS'] - pf['PrevS'])
         pf['TotPnL'] = pf['OptPnL'] + pf['HedgePnL']
@@ -144,7 +143,7 @@ def main():
         outliers = outliers.append(outs)
 
     # Save and display results
-    name = f'Sz={pf_size}_Pct={pct_shorts}_SPY={spy_hedge}_Theta={init_theta}_{pd.Timestamp.now():%Y%m%d_%H%M}'
+    name = f'Sz={pf_size}_Pct={pct_shorts}_SPY={spy_hedge}_Theta={init_theta}_{pd.Timestamp.now():%H%M%S}'
     pnls.to_csv(f'./sims/{name}.csv')
     outliers.to_csv(f'./sims/{name}_outs.csv')
 
@@ -160,4 +159,5 @@ def main():
         print(f'{pnls.index[-i-1]:%Y-%m-%d}: {pnls.iloc[-i-1, 0]:,.0f}')
 
 if __name__ == '__main__':
+    for i in range(10):
         main()
