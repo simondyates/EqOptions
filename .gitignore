@@ -4,5 +4,6 @@
 **/__pycache__
 **/venv
 **/scratch
+**/sims
 *.ipynb
 .DS_Store

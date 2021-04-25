@@ -1,4 +1,6 @@
-# TO DO: Implement SPY Hedge
+# TO DO: support straddles; P&L explain (means saving sig);
+#       ADV sizing; intraday delta hedging; teenie buy-back; SPY net gamma hedging
+#       Rethink the architecture.  Save down sig data
 
 # Runs a simplified trading simulation: Multi-Threaded Implementation with vectorized portfolio pricing
 #
@@ -13,9 +15,11 @@ import numpy as np
 from utils import next_expiry, expiry_list
 import random
 from OptionPricer import EuroOption
+import pickle
 import concurrent.futures
 
 # Key simulation behaviour variables
+random.seed(0) # Don't set this if multi-threading
 pf_size = 500 # underlyings
 pct_shorts = .5
 spy_hedge = False # not implemented yet anyway
@@ -31,7 +35,7 @@ prices = pd.read_pickle('5yrHistData.pkl')
 prices = prices.loc[:, prices.notna().all()]
 avg_data = pd.read_pickle('SPX+MID+R2K_USD5mADV_40bp_spd.pkl').sort_values('ADV_USD', ascending=False)
 # avg_data contains info like ADV, spread width etc.  We're interested in ADV so we can filter the universe
-universe = avg_data.index.intersection(prices.columns)#[:1000] # 1,000 most traded stocks we have data for
+universe = avg_data.index.intersection(prices.columns)[:1000] # 1,000 most traded stocks we have data for
 biotechs = pd.read_csv('Biotechs.csv', index_col='Symbol')
 universe = universe.difference(biotechs.index) # exclude biotechs
 prices = prices[universe.append(pd.Index(['SPY']))] # for when SPY hedge implemented
@@ -42,7 +46,7 @@ stds = returns.rolling(std_window).std() * 252**0.5
 stds = stds[stds.notna().all(axis=1)]
 
 # Specify final output columns
-out_cols = ['PnL', 'LongsP', 'ShortsP', 'LongsD', 'ShortsD', 'LongsG', 'ShortsG',
+out_cols = ['PnL', 'LongsP', 'ShortsP', 'LongH', 'ShortH', 'LongD', 'ShortD', 'LongsG', 'ShortsG',
             'LongsT', 'ShortsT', 'LongsV', 'ShortsV']
 
 # Function to run the sim between two dates
@@ -54,6 +58,7 @@ def run_sim(dts):
     print(f'Processing month {start_dt:%b-%Y}')
 
     # Initialise result variables and filters
+    detail = {}
     pnls = pd.DataFrame(columns=out_cols)
     outliers = pd.DataFrame()
     low_vols = stds.columns[stds.loc[start_dt] < max_vol].to_list()
@@ -75,7 +80,7 @@ def run_sim(dts):
         pf['K'] = K
         pf['Qty'] = q
         pf['CurrP'] = p
-        pf['CurrD'] = d
+        pf['CurrD'] = pf['PrevD'] = d
         pf['CurrG'] = g
         pf['CurrV'] = v
         pf['CurrT'] = -50 * S * g * sig ** 2 / 252
@@ -84,11 +89,20 @@ def run_sim(dts):
 
     # Write initial values to pnls
     def write_date(dt):
+        if dt != start_dt: # otherwise this will (ultimately) overwrite the end_dt dict of the previous sim
+            detail[dt] = pf.copy()
         pnls.loc[dt, 'PnL'] = pf['TotPnL'].sum()
         pnls.loc[dt, 'LongsP'] = (pf['Qty'] * pf['CurrP']).loc[pf['Qty'] > 0].sum()
         pnls.loc[dt, 'ShortsP'] = (pf['Qty'] * pf['CurrP']).loc[pf['Qty'] < 0].sum()
-        pnls.loc[dt, 'LongsD'] = (pf['Qty'] * pf['CurrS'] * pf['CurrD']).loc[pf['Qty'] > 0].sum()
-        pnls.loc[dt, 'ShortsD'] = (pf['Qty'] * pf['CurrS'] * pf['CurrD']).loc[pf['Qty'] < 0].sum()
+        if dt != end_dt: # Final expiring portfolio is flat since physical settle
+            hedges = -(pf['Qty'] * pf['CurrS'] * pf['CurrD'])
+            pnls.loc[dt, 'LongH'] = hedges.loc[hedges > 0].sum()
+            pnls.loc[dt, 'ShortH'] = hedges.loc[hedges < 0].sum()
+        else:
+            pnls.loc[dt, 'LongH'] = pnls.loc[dt, 'ShortH'] = 0
+        deltas = (pf['Qty'] * pf['CurrS'] * (pf['CurrD'] - pf['PrevD']))
+        pnls.loc[dt, 'LongD'] = deltas.loc[deltas > 0].sum()
+        pnls.loc[dt, 'ShortD'] = deltas.loc[deltas < 0].sum()
         pnls.loc[dt, 'LongsG'] = (pf['Qty'] * pf['CurrS'] * pf['CurrG']).loc[pf['Qty'] > 0].sum()
         pnls.loc[dt, 'ShortsG'] = (pf['Qty'] * pf['CurrS'] * pf['CurrG']).loc[pf['Qty'] < 0].sum()
         pnls.loc[dt, 'LongsT'] = (pf['Qty'] * pf['CurrT']).loc[pf['Qty'] > 0].sum()
@@ -120,7 +134,7 @@ def run_sim(dts):
         if len(outs) > 0:
             outliers = outliers.append(outs)
         write_date(dt)
-    return pnls, outliers
+    return detail, pnls, outliers
 
 def main():
     # Split simulation into monthly chunks for parallelization
@@ -129,21 +143,29 @@ def main():
 
     # Initialise result variables
     idx = stds[expiries[0]:expiries[-1]].index
+    details = {}
     pnls = pd.DataFrame(0, index=idx, columns=out_cols)
     outliers = pd.DataFrame()
 
-    # Run sim using multi-threading across available CPU cores
-    with concurrent.futures.ProcessPoolExecutor() as executor:
-        result_pairs = executor.map(run_sim, dt_ranges)
+    # Either: Run sim using multi-threading across available CPU cores
+    # with concurrent.futures.ProcessPoolExecutor() as executor:
+    #    result_pairs = executor.map(run_sim, dt_ranges)
+
+    # Or: Run sim in one thread
+    results = map(run_sim, dt_ranges)
 
     # Reassemble the chunks
-    for pair in result_pairs:
-        pnl, outs = pair
+    for triple in results:
+        detail, pnl, outs = triple
+        details.update(detail)
         pnls.loc[pnl.index] += pnl
         outliers = outliers.append(outs)
 
     # Save and display results
     name = f'Sz={pf_size}_Pct={pct_shorts}_SPY={spy_hedge}_Theta={init_theta}_{pd.Timestamp.now():%H%M%S}'
+    pkl = pickle.dumps(details)
+    with open(f'./sims/{name}_detail.pkl', 'wb') as f:
+        f.write(pkl)
     pnls.to_csv(f'./sims/{name}.csv')
     outliers.to_csv(f'./sims/{name}_outs.csv')
 
